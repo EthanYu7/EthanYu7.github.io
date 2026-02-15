@@ -1,0 +1,529 @@
+
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>2026 马年大吉 - 新年快乐</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+        body, html { width: 100%; height: 100%; overflow: hidden; background: #1a0000; font-family: "Microsoft YaHei", sans-serif; }
+
+        /* 背景渐变 - 调整为更温馨的紫红调 */
+        #bg-layer {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: radial-gradient(circle at center, #3d0000 0%, #1a0000 100%);
+            z-index: -2;
+        }
+
+        canvas { display: block; position: fixed; top: 0; left: 0; z-index: 1; }
+
+        /* UI层 */
+        #ui-overlay {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            z-index: 10;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 2s ease;
+        }
+
+        /* 3D 鎏金效果文字 */
+        .gilded-text {
+            color: #ffd700;
+            text-align: center;
+            font-weight: bold;
+            text-transform: uppercase;
+            text-shadow: 
+                0 0 15px rgba(255, 215, 0, 0.7),
+                2px 2px 2px #5d2e0a;
+            -webkit-background-clip: text;
+            background-image: linear-gradient(to bottom, #fff9c4, #ffd700, #ff8f00);
+            letter-spacing: 2px;
+            animation: breathe 3s ease-in-out infinite;
+        }
+
+        #countdown-container { margin-bottom: 20px; }
+        #countdown-val { 
+            font-size: max(2rem, 5vw); 
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        #greeting-text { font-size: 2.2rem; margin-top: 15px; width: 85%; }
+
+        #hint-text {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 0.8rem;
+            opacity: 0.7;
+            animation: none !important;
+            z-index: 20;
+        }
+
+        @keyframes breathe {
+            0%, 100% { transform: scale(1); filter: brightness(1); }
+            50% { transform: scale(1.04); filter: brightness(1.2); }
+        }
+
+        /* 静音按钮 */
+        #mute-btn {
+            position: fixed;
+            top: 20px; right: 20px;
+            width: 44px; height: 44px;
+            background: rgba(139, 0, 0, 0.8);
+            border: 2px solid #ffd700;
+            border-radius: 50%;
+            z-index: 100;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #ffd700;
+            box-shadow: 0 0 10px rgba(0,0,0,0.5);
+        }
+    </style>
+<link rel="stylesheet" href="/index.css">
+</head>
+<body>
+    <div id="bg-layer"></div>
+    <canvas id="mainCanvas"></canvas>
+    
+    <div id="mute-btn">
+        <svg id="icon-sound" viewBox="0 0 24 24" width="24" height="24" fill="currentColor">
+            <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/>
+        </svg>
+    </div>
+
+    <div id="ui-overlay">
+        <div id="countdown-container">
+            <div id="countdown-label" class="gilded-text" style="font-size: 1.2rem;">距离 2026 农历新年还有</div>
+            <div id="countdown-val" class="gilded-text">00 天 00:00:00</div>
+        </div>
+        <div id="greeting-text" class="gilded-text">
+            祝你 <br>新年快乐 马到成功
+        </div>
+    </div>
+    <div id="hint-text" class="gilded-text">长按屏幕来点烟花😉</div>
+
+    <script>
+        /**
+         * 核心配置
+         */
+        const CONFIG = {
+            NEW_YEAR_TIME: new Date('2026-02-17T00:00:00').getTime(),
+            // 性能上限强制修改
+            MAX_PARTICLE_FIREWORKS: 10,  // 普通粒子烟花最多 10 个
+            MAX_TEXT_FIREWORKS: 3,      // 祝福语烟花最多 3 个
+            AUTO_FIREWORK_INTERVAL: 2500, 
+            BLESSINGS: ["马到成功", "马上有钱", "龙马精神", "一马当先", "万事如意", "金玉满堂", "阖家欢乐", "大吉大利"],
+            CHAR_PARTICLES: ["福", "春", "🐎", "🏮", "🧨", "🧧", "乐"], // 加入马年图标
+            INTRO_NUMBERS: ["06", "05", "04", "03", "02", "01", "00"],
+            INTRO_TEXTS: ["烟火向星辰", "所愿皆成真", "2026 马年", "祝你：", "怀揣滚烫的热爱","策马扬鞭","奔赴心中的山海","不负韶华","愿你在追梦的路上","既有星辰大海的征途","也有烟火人间的安暖","前路浩荡","万事尽可期待"]
+        };
+
+        const canvas = document.getElementById('mainCanvas');
+        const ctx = canvas.getContext('2d');
+        let width, height, dpr;
+
+        const AudioMgr = {
+            ctx: null,
+            muted: false,
+            init() {
+                if (!this.ctx) this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+            },
+            playPop() {
+                if (this.muted || !this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(150, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.5);
+                gain.gain.setValueAtTime(0.08, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.5);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.5);
+            },
+            playLaunch() {
+                // 现已不再直接调用，但保留方法定义以减少代码重构影响
+                if (this.muted || !this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(120, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(450, this.ctx.currentTime + 0.8);
+                gain.gain.setValueAtTime(0.02, this.ctx.currentTime);
+                gain.gain.linearRampToValueAtTime(0, this.ctx.currentTime + 0.8);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.8);
+            }
+        };
+
+        class Particle {
+            constructor(x, y, color, char = null, isPhrase = false) {
+                this.x = x;
+                this.y = y;
+                const angle = Math.random() * Math.PI * 2;
+                // 祝福语长句粒子初速度稍慢，向上趋势
+                const speed = isPhrase ? (Math.random() * 3 + 1) : (Math.random() * 10 + 4);
+                this.vx = Math.cos(angle) * speed;
+                this.vy = Math.sin(angle) * speed;
+                if(isPhrase) this.vy -= 2; // 缓慢上升趋势
+
+                this.color = color || '#ffffff';
+                this.char = char;
+                this.isPhrase = isPhrase;
+                this.radius = Math.random() * 2 + 1.2;
+                this.alpha = 1;
+                this.timer = 0;
+                this.gravity = 0.06; // 调微为 0.06，增加漂浮感
+                this.friction = isPhrase ? 0.98 : 0.95; // 祝福语摩擦力更小，更平滑
+            }
+
+            update() {
+                this.timer++;
+                this.vx *= this.friction;
+                this.vy *= this.friction;
+                this.vy += this.gravity;
+                
+                // 祝福语粒子淡出稍慢
+                this.alpha -= (this.isPhrase ? 0.01 : 0.025);
+                
+                this.x += this.vx;
+                this.y += this.vy;
+            }
+
+            draw() {
+                if (this.alpha <= 0) return;
+                ctx.save();
+                ctx.globalAlpha = this.alpha;
+                ctx.fillStyle = this.color;
+                if (this.char) {
+                    // 祝福语烟花使用金色固定配色，文字大小 18-22px
+                    if (this.isPhrase) {
+                        ctx.font = `bold ${Math.floor(Math.random()*4 + 18)}px Microsoft YaHei`;
+                        ctx.shadowBlur = 10;
+                        ctx.shadowColor = "rgba(255, 215, 0, 0.5)";
+                    } else {
+                        ctx.font = '18px serif';
+                    }
+                    ctx.textAlign = 'center';
+                    ctx.fillText(this.char, this.x, this.y);
+                } else {
+                    ctx.beginPath();
+                    ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+                ctx.restore();
+            }
+        }
+
+        class Firework {
+            constructor(targetX, targetY, isText = false) {
+                this.targetX = targetX;
+                this.targetY = targetY;
+                this.isText = isText;
+                this.x = targetX + (Math.random() - 0.5) * 60;
+                this.y = height + 10;
+                this.vx = (targetX - this.x) / 40;
+                this.vy = -Math.sqrt(2 * 0.15 * (height - targetY)) * (0.9 + Math.random() * 0.3);
+                this.launched = false;
+                this.particles = [];
+                // 上升阶段金色拖尾
+                this.shellTail = []; 
+                this.dead = false;
+                this.timer = 0;
+                this.color = ['#ff2222', '#ffd700', '#ff00ff', '#00ffff', '#ffa500'][Math.floor(Math.random() * 5)];
+                // 移除了 AudioMgr.playLaunch();
+            }
+
+            burst() {
+                this.launched = true;
+                AudioMgr.playPop();
+                if (this.isText) {
+                    // 祝福语烟花：完整短句粒子，仅生成 10-15 个
+                    const phrase = CONFIG.BLESSINGS[Math.floor(Math.random() * CONFIG.BLESSINGS.length)];
+                    const count = Math.floor(Math.random() * 6) + 10;
+                    for (let i = 0; i < count; i++) {
+                        this.particles.push(new Particle(this.x, this.y, '#FFD700', phrase, true));
+                    }
+                } else {
+                    // 普通粒子烟花：加入马年图标（20% 占比）
+                    for (let i = 0; i < 80; i++) {
+                        let char = null;
+                        if (Math.random() < 0.2) {
+                            char = CONFIG.CHAR_PARTICLES[Math.floor(Math.random() * CONFIG.CHAR_PARTICLES.length)];
+                        }
+                        this.particles.push(new Particle(this.x, this.y, this.color, char, false));
+                    }
+                }
+            }
+
+            update() {
+                if (!this.launched) {
+                    this.vy += 0.15;
+                    this.x += this.vx;
+                    this.y += this.vy;
+                    // 上升阶段金色拖尾：由 3-5 个逐渐变小透明的光点组成
+                    this.shellTail.push({x: this.x, y: this.y, a: 1, s: 3});
+                    if (this.shellTail.length > 5) this.shellTail.shift();
+                    this.shellTail.forEach((t, idx) => {
+                        t.a -= 0.15;
+                        t.s *= 0.9;
+                    });
+
+                    if (this.vy >= 0 || this.y <= this.targetY) this.burst();
+                } else {
+                    this.timer++;
+                    this.particles.forEach(p => p.update());
+                    this.particles = this.particles.filter(p => p.alpha > 0);
+                    if (this.particles.length === 0 && this.timer > 30) this.dead = true;
+                }
+            }
+
+            draw() {
+                // 绘制拖尾
+                this.shellTail.forEach(t => {
+                    ctx.save();
+                    ctx.globalAlpha = t.a * 0.7;
+                    ctx.fillStyle = '#ffd700';
+                    ctx.beginPath();
+                    ctx.arc(t.x, t.y, t.s, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.restore();
+                });
+
+                if (!this.launched) {
+                    ctx.save();
+                    ctx.fillStyle = '#fff';
+                    ctx.shadowBlur = 12;
+                    ctx.shadowColor = this.color;
+                    ctx.beginPath();
+                    ctx.arc(this.x, this.y, 3, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.restore();
+                } else {
+                    this.particles.forEach(p => p.draw());
+                }
+            }
+        }
+
+        const Engine = {
+            state: 'intro',
+            fireworks: [],
+            lastAutoFirework: Date.now(),
+            textAlpha: 0,
+            currentIntroText: '',
+            backgroundElements: [],
+            
+            init() {
+                this.resize();
+                window.addEventListener('resize', () => this.resize());
+                this.initBackgroundElements();
+                this.playIntro();
+                this.animate();
+            },
+
+            resize() {
+                dpr = window.devicePixelRatio || 1;
+                width = window.innerWidth;
+                height = window.innerHeight;
+                canvas.width = width * dpr;
+                canvas.height = height * dpr;
+                canvas.style.width = width + 'px';
+                canvas.style.height = height + 'px';
+                ctx.scale(dpr, dpr);
+            },
+
+            initBackgroundElements() {
+                this.backgroundElements = [];
+                for (let i = 0; i < 15; i++) {
+                    this.backgroundElements.push({
+                        x: Math.random() * width,
+                        y: Math.random() * height,
+                        speed: Math.random() * 0.5 + 0.2,
+                        char: CONFIG.CHAR_PARTICLES[Math.floor(Math.random() * CONFIG.CHAR_PARTICLES.length)],
+                        alpha: Math.random() * 0.1 + 0.05,
+                        size: Math.random() * 40 + 20
+                    });
+                }
+            },
+
+            updateBackgroundElements() {
+                this.backgroundElements.forEach(el => {
+                    el.y -= el.speed;
+                    if (el.y < -el.size) el.y = height + el.size;
+                });
+            },
+
+            drawBackgroundElements() {
+                this.backgroundElements.forEach(el => {
+                    ctx.save();
+                    ctx.globalAlpha = el.alpha;
+                    ctx.fillStyle = '#ffd700';
+                    ctx.font = `${el.size}px serif`;
+                    ctx.fillText(el.char, el.x, el.y);
+                    ctx.restore();
+                });
+            },
+
+            async playIntro() {
+                const isNewYear = Date.now() >= CONFIG.NEW_YEAR_TIME;
+                if (isNewYear) {
+                    for (let n of CONFIG.INTRO_NUMBERS) {
+                        this.currentIntroText = n; this.currentFontSize = 180;
+                        await this.fadeIntro(800);
+                    }
+                    for (let t of CONFIG.INTRO_TEXTS) {
+                        this.currentIntroText = t; this.currentFontSize = 45;
+                        await this.fadeIntro(1400);
+                    }
+                }
+                this.state = 'main';
+                document.getElementById('ui-overlay').style.opacity = '1';
+                this.startCountdown();
+            },
+
+            fadeIntro(delay) {
+                return new Promise(res => {
+                    this.textAlpha = 0;
+                    let fadeIn = setInterval(() => {
+                        this.textAlpha += 0.1;
+                        if(this.textAlpha >= 1) {
+                            clearInterval(fadeIn);
+                            setTimeout(() => {
+                                let fadeOut = setInterval(() => {
+                                    this.textAlpha -= 0.1;
+                                    if(this.textAlpha <= 0) { clearInterval(fadeOut); res(); }
+                                }, 50);
+                            }, delay);
+                        }
+                    }, 50);
+                });
+            },
+
+            startCountdown() {
+                const update = () => {
+                    const diff = CONFIG.NEW_YEAR_TIME - Date.now();
+                    if (diff <= 0) {
+                        document.getElementById('countdown-label').innerText = "新年已到";
+                        document.getElementById('countdown-val').innerText = "新年快乐，马年大吉！";
+                        document.getElementById('greeting-text').style.display = 'block';
+                        return;
+                    }
+                    const d = Math.floor(diff/(1000*60*60*24));
+                    const h = Math.floor((diff/(1000*60*60))%24);
+                    const m = Math.floor((diff/(1000*60))%60);
+                    const s = Math.floor((diff/1000)%60);
+                    document.getElementById('countdown-val').innerText = `${d}天 ${h.toString().padStart(2,'0')}:${m.toString().padStart(2,'0')}:${s.toString().padStart(2,'0')}`;
+                    document.getElementById('greeting-text').style.display = 'none';
+                    setTimeout(update, 1000);
+                };
+                update();
+            },
+
+            // 拆分并发限制：达到上限直接返回
+            addFirework(x, y, manual = false) {
+                const particleCount = this.fireworks.filter(f => !f.isText).length;
+                const textCount = this.fireworks.filter(f => f.isText).length;
+                
+                // 达到总上限 15
+                if (this.fireworks.length >= 15) return;
+
+                // 手动点击 30% 概率触发祝福语烟花
+                let shouldBeText = manual && Math.random() < 0.3;
+                
+                if (shouldBeText) {
+                    if (textCount < CONFIG.MAX_TEXT_FIREWORKS) {
+                        this.fireworks.push(new Firework(x, y, true));
+                    } else if (particleCount < CONFIG.MAX_PARTICLE_FIREWORKS) {
+                        // 文字烟花满了，退而求其次生成普通烟花
+                        this.fireworks.push(new Firework(x, y, false));
+                    }
+                } else {
+                    if (particleCount < CONFIG.MAX_PARTICLE_FIREWORKS) {
+                        this.fireworks.push(new Firework(x, y, false));
+                    }
+                }
+            },
+
+            animate() {
+                requestAnimationFrame(() => this.animate());
+                // 背景残影调整为偏暖紫色
+                ctx.fillStyle = 'rgba(44, 0, 0, 0.2)';
+                ctx.fillRect(0, 0, width, height);
+
+                this.updateBackgroundElements();
+                this.drawBackgroundElements();
+
+                if (this.state === 'intro' && this.textAlpha > 0) {
+                    ctx.save();
+                    ctx.globalAlpha = this.textAlpha;
+                    ctx.fillStyle = '#ffd700';
+                    ctx.font = `bold ${this.currentFontSize}px sans-serif`;
+                    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+                    ctx.shadowBlur = 20; ctx.shadowColor = '#ff4500';
+                    ctx.fillText(this.currentIntroText, width / 2, height / 2);
+                    ctx.restore();
+                }
+
+                this.fireworks.forEach((f, i) => {
+                    f.update();
+                    f.draw();
+                    if (f.dead) this.fireworks.splice(i, 1);
+                });
+
+                // 固定每次发射 1 个自动烟花
+                if (Date.now() - this.lastAutoFirework > CONFIG.AUTO_FIREWORK_INTERVAL) {
+                    this.addFirework(Math.random() * width, height * 0.15 + Math.random() * height * 0.4, false);
+                    this.lastAutoFirework = Date.now();
+                }
+            }
+        };
+
+        let pressTimer;
+        function interact(e) {
+            AudioMgr.init();
+            if (Engine.state !== 'main') return;
+            const x = e.touches ? e.touches[0].clientX : e.clientX;
+            const y = e.touches ? e.touches[0].clientY : e.clientY;
+            Engine.addFirework(x, y, true);
+        }
+
+        window.addEventListener('mousedown', (e) => {
+            interact(e);
+            pressTimer = setInterval(() => {
+                // 长按仅生成普通烟花
+                Engine.addFirework(Math.random()*width, height*0.2 + Math.random()*height*0.3, false);
+            }, 350);
+        });
+        window.addEventListener('mouseup', () => clearInterval(pressTimer));
+        window.addEventListener('touchstart', (e) => {
+            e.preventDefault(); interact(e);
+            pressTimer = setInterval(() => {
+                Engine.addFirework(Math.random()*width, height*0.2 + Math.random()*height*0.3, false);
+            }, 350);
+        });
+        window.addEventListener('touchend', () => clearInterval(pressTimer));
+
+        document.getElementById('mute-btn').addEventListener('click', (e) => {
+            e.stopPropagation(); AudioMgr.muted = !AudioMgr.muted;
+            document.getElementById('icon-sound').style.opacity = AudioMgr.muted ? '0.3' : '1';
+        });
+
+        window.onload = () => Engine.init();
+    </script>
+<script type="module" src="/index.tsx"></script>
+</body>
+</html>
